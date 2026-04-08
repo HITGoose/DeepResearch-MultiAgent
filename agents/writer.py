@@ -39,6 +39,7 @@ def writer_node(state: ResearchState) -> dict:
     
     # Build actual source pool from search results
     search_results = state.get("search_results", [])
+    recent_results = search_results[-20:]
     source_pool_lines = []
     seen_urls = set()
     for r in search_results:

@@ -116,11 +116,8 @@ class NLIVerifier:
             print(f"    ⚠️ 配对数过多，截取前 {MAX_COMPARISONS} 对")
             pairs_to_check = pairs_to_check[:MAX_COMPARISONS]
         
-        # --- Run NLI (with progress) ---
+        # --- Run NLI ---
         for i, (claim, other_claim, other_source) in enumerate(pairs_to_check):
-            if (i + 1) % 20 == 0 or i == 0:
-                print(f"    NLI 验证进度: {i+1}/{len(pairs_to_check)}")
-            
             result = self.verify_claim_against_source(claim, other_claim)
             
             if result["label"] == "entailment" and result["scores"]["entailment"] > 0.85:
@@ -130,7 +127,7 @@ class NLIVerifier:
                 if other_source not in all_claims[claim]["contradictors"]:
                     all_claims[claim]["contradictors"].append(other_source)
         
-        print(f"    NLI 验证完成 ✅")
+        print(f"    NLI 验证完成: {len(pairs_to_check)} 对配对已检查 ✅")
         
         # --- Determine confidence ---
         results = []

@@ -1,374 +1,330 @@
 """
-DeepResearch-Agent — Streamlit 前端
-
-实时展示多 Agent 协作过程，支持交互式研究查询。
+DeepResearch-Agent — Streamlit 前端终极优化版
+包含：居中布局、思考动画、长链接换行修复、isatty报错修复、思考过程历史留存
 """
 import streamlit as st
 import time
-import os
 import sys
-import json
+import traceback
 from datetime import datetime
-from io import StringIO
-from contextlib import redirect_stdout
 
-# Page config
 st.set_page_config(
     page_title="DeepResearch-Agent",
     page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered", 
+    initial_sidebar_state="collapsed",
 )
 
-# ===== Custom CSS =====
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+.stApp { font-family: 'Noto Sans SC', sans-serif; background: #f7f7f8; }
+#MainMenu, footer, header { visibility: hidden; }
 
-/* Global */
-.stApp {
-    font-family: 'Noto Sans SC', sans-serif;
-}
+.welcome { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:55vh; text-align:center; }
+.welcome-icon { font-size:3.2rem; margin-bottom:0.8rem; }
+.welcome-title { font-size:1.9rem; font-weight:700; color:#1a1a1a; }
+.welcome-sub { font-size:0.9rem; color:#9ca3af; margin-top:0.4rem; line-height:1.6; }
+.welcome-tags { display:flex; gap:8px; margin-top:1.2rem; flex-wrap:wrap; justify-content:center; }
+.wtag { padding:5px 13px; background:#fff; border:1px solid #e5e7eb; border-radius:20px; font-size:0.76rem; color:#6b7280; }
 
-/* Header */
-.main-header {
-    background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 50%, #0d2137 100%);
-    padding: 2rem 2.5rem;
-    border-radius: 16px;
-    margin-bottom: 1.5rem;
-    border: 1px solid rgba(100, 200, 255, 0.15);
-    position: relative;
-    overflow: hidden;
-}
-.main-header::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: radial-gradient(ellipse at 20% 50%, rgba(56, 189, 248, 0.08) 0%, transparent 70%);
-    pointer-events: none;
-}
-.main-header h1 {
-    color: #e2e8f0;
-    font-size: 1.8rem;
-    font-weight: 700;
-    margin: 0 0 0.3rem 0;
-    letter-spacing: -0.02em;
-}
-.main-header p {
-    color: #94a3b8;
-    font-size: 0.95rem;
-    margin: 0;
+.u-msg { 
+    background:#2563eb; color:#fff; border-radius:18px 18px 4px 18px; 
+    padding:10px 16px; margin:8px 0 8px auto; max-width:85%; 
+    width: fit-content; 
+    font-size:0.92rem; line-height:1.5; 
 }
 
-/* Agent status cards */
-.agent-card {
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(100, 200, 255, 0.12);
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.8rem;
-    backdrop-filter: blur(8px);
-    transition: border-color 0.3s;
+.a-msg { 
+    background:#fff; border:1px solid #e5e7eb; border-radius:18px 18px 18px 4px; 
+    padding:12px 16px; margin:8px 0; max-width:100%; 
+    width: fit-content;
+    font-size:0.92rem; color:#374151; line-height:1.6; 
 }
-.agent-card.active {
-    border-color: rgba(56, 189, 248, 0.5);
-    box-shadow: 0 0 20px rgba(56, 189, 248, 0.1);
-}
-.agent-card.done {
-    border-color: rgba(74, 222, 128, 0.4);
-}
-.agent-name {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: #38bdf8;
-    margin-bottom: 0.3rem;
-}
-.agent-status {
-    font-size: 0.8rem;
-    color: #94a3b8;
-}
+.a-label { font-size:0.7rem; color:#9ca3af; margin-bottom:4px; font-weight:500; }
 
-/* Metric cards */
-.metric-row {
-    display: flex;
-    gap: 1rem;
-    margin: 1rem 0;
+.thinking-text { font-size:0.85rem; color:#2563eb; font-weight:600; display:flex; align-items:center; margin-bottom: 8px; }
+.loader { 
+    border: 2px solid #e5e7eb; border-top: 2px solid #2563eb; 
+    border-radius: 50%; width: 14px; height: 14px; 
+    animation: spin 1s linear infinite; display: inline-block; 
+    margin-right: 8px; vertical-align: middle; 
 }
-.metric-card {
-    flex: 1;
-    background: rgba(15, 23, 42, 0.5);
-    border: 1px solid rgba(100, 200, 255, 0.1);
-    border-radius: 10px;
-    padding: 1rem;
-    text-align: center;
-}
-.metric-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.6rem;
-    font-weight: 700;
-    color: #e2e8f0;
-}
-.metric-label {
-    font-size: 0.75rem;
-    color: #64748b;
-    margin-top: 0.2rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-/* Log area */
-.log-container {
-    background: #0a0a1a;
-    border: 1px solid rgba(100, 200, 255, 0.08);
-    border-radius: 10px;
-    padding: 1rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-    color: #a0aec0;
-    max-height: 400px;
-    overflow-y: auto;
-    line-height: 1.6;
-}
+.sp { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:14px; font-size:0.73rem; font-family:'JetBrains Mono',monospace; margin:2px 3px 2px 0; }
+.sp-run { background:#dbeafe; color:#2563eb; border:1px solid #93c5fd; }
+.sp-done { background:#ecfdf5; color:#059669; border:1px solid #a7f3d0; }
+.sp-wait { background:#f9fafb; color:#d1d5db; border:1px solid #e5e7eb; }
 
-/* Score badge */
-.score-badge {
-    display: inline-block;
-    padding: 0.3rem 0.8rem;
-    border-radius: 20px;
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    font-size: 0.9rem;
+.mrow { display:flex; gap:1rem; margin-top:6px; font-size:0.76rem; color:#6b7280; font-family:'JetBrains Mono',monospace; }
+.mv { font-weight:600; color:#374151; }
+
+.detail-line { font-size:0.78rem; color:#6b7280; margin:6px 0 2px 0; padding-left:4px; font-family:'JetBrains Mono',monospace; }
+
+details.log-dropdown { margin-top: 8px; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
+details.log-dropdown summary { text-align: right; font-size: 0.75rem; color: #9ca3af; cursor: pointer; list-style: none; outline: none; }
+details.log-dropdown summary::-webkit-details-marker { display: none; }
+details.log-dropdown summary:hover { color: #2563eb; }
+.log-content { background: #ffffff; border: 1px solid #000000; padding: 8px 10px; border-radius: 6px; font-size: 0.72rem; color: #4b5563; max-height: 200px; overflow-y: auto; white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; text-align: left; margin-top: 6px; }
+
+/* 修复长链接/长文本撑破容器的问题 */
+div[data-testid="stExpander"] p, div[data-testid="stExpander"] a, .stMarkdown p, .stMarkdown a {
+    word-wrap: break-word; overflow-wrap: break-word; word-break: break-all; white-space: normal;
 }
-.score-high { background: rgba(74, 222, 128, 0.15); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
-.score-mid { background: rgba(250, 204, 21, 0.15); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); }
-.score-low { background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.3); }
+div[data-testid="stExpander"] { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; margin-top: 10px; }
+/* --- 修复输入框选中时的红色边框，改为科技浅蓝 --- */
+div[data-testid="stChatInput"] > div:focus-within {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 1px #3b82f6 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
+# ===== State =====
+for key, default in [
+    ("msgs", []), ("running", False), ("report", None),
+    ("rmeta", {}), ("pending", None)
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-def render_header():
-    st.markdown("""
-    <div class="main-header">
-        <h1>🔬 DeepResearch-Agent</h1>
-        <p>多智能体协作深度研究系统 · Simulate-Before-Act · Cross-Source NLI Verification</p>
-    </div>
-    """, unsafe_allow_html=True)
+STEPS = [
+    ("planner",  "🧠", "规划"),
+    ("searcher", "🔍", "搜索"),
+    ("analyzer", "🔬", "分析"),
+    ("writer",   "✍️", "撰写"),
+    ("critic",   "🧐", "评审"),
+]
 
+STEP_KEYWORDS = {
+    "规划器": "planner",
+    "搜索器": "searcher",
+    "分析器": "analyzer",
+    "撰写器": "writer",
+    "评审器": "critic",
+}
 
-def render_agent_pipeline(current_agent: str = ""):
-    """Render the agent pipeline status in sidebar."""
-    agents = [
-        ("🧠", "规划器 Planner", "Simulate-Before-Act 搜索规划"),
-        ("🔍", "搜索器 Searcher", "多源并行搜索 + 压缩"),
-        ("🔬", "分析器 Analyzer", "NLI 交叉验证"),
-        ("✍️", "撰写器 Writer", "带引用报告生成"),
-        ("🧐", "评审器 Critic", "LLM-as-a-Judge"),
-    ]
+def build_progress(current_step: str, done_steps: set, detail: str = "", iteration: int = 0, all_logs: list = []):
+    """动态运行时的进度条生成器"""
+    pills = ""
+    if current_step:
+        for key, icon, name in STEPS:
+            if key in done_steps:
+                pills += f'<span class="sp sp-done">{icon} {name} ✓</span>'
+            elif key == current_step:
+                pills += f'<span class="sp sp-run">{icon} {name} ⟳</span>'
+            else:
+                pills += f'<span class="sp sp-wait">{icon} {name}</span>'
 
-    st.sidebar.markdown("### 🔄 Agent Pipeline")
+    iter_label = f" · 第{iteration+1}轮" if iteration > 0 else ""
+    detail_html = f'<div class="detail-line">➤ {detail}</div>' if detail else ""
+    
+    logs_html = ""
+    if all_logs:
+        joined_logs = "\n".join(all_logs).replace("<", "&lt;").replace(">", "&gt;")
+        logs_html = (
+            f'<details class="log-dropdown">'
+            f'<summary>🔽 展开实时日志</summary>'
+            f'<div class="log-content">{joined_logs}</div>'
+            f'</details>'
+        )
 
-    for icon, name, desc in agents:
-        short_name = name.split()[0]
-        if short_name in current_agent:
-            status_class = "active"
-            status_text = "⚡ 运行中..."
-        elif agents.index((icon, name, desc)) < next(
-            (i for i, (_, n, _) in enumerate(agents) if n.split()[0] in current_agent), len(agents)
-        ):
-            status_class = "done"
-            status_text = "✅ 完成"
-        else:
-            status_class = ""
-            status_text = "⏳ 等待中"
-
-        st.sidebar.markdown(f"""
-        <div class="agent-card {status_class}">
-            <div class="agent-name">{icon} {name}</div>
-            <div class="agent-status">{desc}<br/>{status_text}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-def render_metrics(iterations: int, score: float, elapsed: float, report_len: int):
-    """Render metric cards."""
-    score_class = "score-high" if score >= 7 else "score-mid" if score >= 5 else "score-low"
-
-    st.markdown(f"""
-    <div class="metric-row">
-        <div class="metric-card">
-            <div class="metric-value">{iterations}</div>
-            <div class="metric-label">迭代次数</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value"><span class="score-badge {score_class}">{score:.1f}/10</span></div>
-            <div class="metric-label">最终得分</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{elapsed:.0f}s</div>
-            <div class="metric-label">总耗时</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{report_len:,}</div>
-            <div class="metric-label">报告字符数</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    return (
+        f'<div class="a-msg">'
+        f'<div class="a-label">🔬 DeepResearch-Agent{iter_label}</div>'
+        f'<div class="thinking-text"><span class="loader"></span> <span>Thinking...</span></div>'
+        f'<div>{pills}</div>'
+        f'{detail_html}{logs_html}'
+        f'</div>'
+    )
 
 
-def run_research_ui(query: str):
-    """Run the research pipeline with real-time UI updates."""
+def do_research(query):
+    progress = st.empty()
+    progress.markdown(
+        build_progress(current_step=None, done_steps=set(), detail="正在分配计算资源与建立通信...", iteration=0, all_logs=[]),
+        unsafe_allow_html=True
+    )
+
     from core.graph import compile_graph
     from core.state import ResearchState
 
-    # Initialize state
-    initial_state: ResearchState = {
+    init: ResearchState = {
         "user_query": query,
-        "candidate_plans": [],
-        "selected_plan": None,
-        "search_results": [],
-        "verified_claims": [],
-        "analysis_summary": "",
-        "report_draft": "",
-        "citations": [],
-        "critic_feedback": None,
-        "current_iteration": 0,
-        "failed_strategies": [],
+        "candidate_plans": [], "selected_plan": None,
+        "search_results": [], "verified_claims": [],
+        "analysis_summary": "", "report_draft": "",
+        "citations": [], "critic_feedback": None,
+        "current_iteration": 0, "failed_strategies": [],
         "status": "planning",
     }
 
-    # UI placeholders
-    status_placeholder = st.empty()
-    log_placeholder = st.empty()
-    metrics_placeholder = st.empty()
-    report_placeholder = st.empty()
+    t0 = time.time()
+    old_stdout = sys.stdout
 
-    # Capture stdout for live log
-    log_lines = []
+    current_step = "planner"
+    done_steps = set()
+    last_detail = "系统已启动，正在规划研究路径..."
+    iteration = 0
+    all_logs = [] 
 
-    class LogCapture:
+    class ProgressCapture:
         def __init__(self):
-            self.terminal = sys.stdout
+            self.terminal = old_stdout
+
+        # 【修复点 1】：加入 isatty 修复 NLI 验证器 tqdm 进度条报错
+        def isatty(self):
+            return hasattr(self.terminal, 'isatty') and self.terminal.isatty()
 
         def write(self, msg):
-            if msg.strip():
-                log_lines.append(msg.rstrip())
-                # Update log display
-                log_html = "<br>".join(log_lines[-30:])  # Show last 30 lines
-                log_placeholder.markdown(
-                    f'<div class="log-container">{log_html}</div>',
-                    unsafe_allow_html=True,
-                )
+            nonlocal current_step, done_steps, last_detail, iteration, all_logs
             self.terminal.write(msg)
+
+            if not msg.strip():
+                return
+            
+            all_logs.append(msg.strip())
+
+            for keyword, step_key in STEP_KEYWORDS.items():
+                if keyword in msg and "正在" in msg:
+                    if current_step and current_step != step_key:
+                        done_steps.add(current_step)
+                    current_step = step_key
+                    break
+
+            line = msg.strip()
+            if line.startswith("[web]") or line.startswith("[arxiv]"):
+                last_detail = line[:60] + "..." if len(line)>60 else line
+            elif "搜索中:" in line:
+                last_detail = line.split("搜索中:")[-1].strip()[:50]
+            elif "压缩后结果总数" in line:
+                last_detail = line
+            elif "验证范围" in line or "NLI" in line:
+                last_detail = line.strip()
+            elif "覆盖度=" in line:
+                last_detail = line.strip()[:60]
+            elif "总分:" in line or "判定:" in line:
+                last_detail = line.strip()
+            elif "第" in line and "轮迭代" in line:
+                iteration += 1
+                done_steps = set() 
+                current_step = "planner"
+            elif "报告已生成" in line:
+                last_detail = line.strip()
+
+            progress.markdown(
+                build_progress(current_step, done_steps, last_detail, iteration, all_logs),
+                unsafe_allow_html=True,
+            )
 
         def flush(self):
             self.terminal.flush()
 
-    # Run
-    start_time = time.time()
-    old_stdout = sys.stdout
-    sys.stdout = LogCapture()
-
     try:
-        status_placeholder.info("🚀 研究进行中... 请耐心等待（预计 3-10 分钟）")
+        sys.stdout = ProgressCapture()
         graph = compile_graph()
-        final_state = graph.invoke(initial_state)
-
-        elapsed = time.time() - start_time
-        report = final_state.get("report_draft", "")
-        feedback = final_state.get("critic_feedback")
-        iterations = final_state.get("current_iteration", 0) + 1
-        score = feedback.score if feedback else 0
-
-        # Success status
-        status_placeholder.success(f"✅ 研究完成！耗时 {elapsed:.0f} 秒，迭代 {iterations} 轮")
-
-        # Metrics
-        with metrics_placeholder.container():
-            render_metrics(iterations, score, elapsed, len(report))
-
-        # Report
-        with report_placeholder.container():
-            st.markdown("---")
-            st.markdown("### 📄 研究报告")
-            st.markdown(report)
-
-            # Download button
-            st.download_button(
-                label="📥 下载报告 (Markdown)",
-                data=report,
-                file_name=f"research_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
-                mime="text/markdown",
-            )
-
-        # NLI stats in sidebar
-        verified = final_state.get("verified_claims", [])
-        if verified:
-            st.sidebar.markdown("### 📊 NLI 验证统计")
-            high = sum(1 for c in verified if c.confidence == "high")
-            disputed = sum(1 for c in verified if c.confidence == "disputed")
-            unverified = sum(1 for c in verified if c.confidence == "unverified")
-            st.sidebar.metric("✅ 高可信度", high)
-            st.sidebar.metric("⚠️ 有争议", disputed)
-            st.sidebar.metric("❓ 待验证", unverified)
-
-    except Exception as e:
-        status_placeholder.error(f"❌ 研究出错: {str(e)}")
-        st.exception(e)
-    finally:
+        final = graph.invoke(init)
         sys.stdout = old_stdout
 
+        dt = time.time() - t0
+        rpt = final.get("report_draft", "")
+        fb = final.get("critic_feedback")
+        it = final.get("current_iteration", 0) + 1
+        sc = fb.score if fb and hasattr(fb, 'score') else 0
+        
+        st.session_state.report = rpt
+        st.session_state.rmeta = {"score": sc, "iters": it, "time": dt, "chars": len(rpt)}
+        
+        progress.empty()
+        # 【修复点 2】：把 all_logs 塞进历史消息里留存
+        st.session_state.msgs.append({
+            "role": "assistant",
+            "content": f"研究完成！得分 {sc:.1f}/10，耗时 {dt:.0f}s，{it} 轮迭代。",
+            "time": datetime.now().strftime("%H:%M"),
+            "logs": all_logs  # 保存思考过程
+        })
 
-# ===== Main App =====
-render_header()
+    except Exception as e:
+        sys.stdout = old_stdout
+        progress.empty()
+        st.error(f"❌ 运行异常: {e}")
+        st.code(traceback.format_exc())
+    finally:
+        sys.stdout = old_stdout
+        st.session_state.running = False
+        st.session_state.pending = None
 
-# Sidebar config
-st.sidebar.markdown("### ⚙️ 配置")
-st.sidebar.caption("模型和搜索 API 通过 .env 文件配置")
 
-# Example queries
-EXAMPLES = [
-    "What is Model Context Protocol (MCP) and how does it work?",
-    "Compare LangGraph and CrewAI for multi-agent development",
-    "Compare RAG and fine-tuning for adapting LLMs to domain-specific tasks",
-    "What are the key techniques for reducing hallucination in LLM-based agents?",
-]
+# ===== Layout =====
+has_msgs = len(st.session_state.msgs) > 0
 
-st.sidebar.markdown("### 📝 示例查询")
-selected_example = st.sidebar.selectbox(
-    "选择一个示例：",
-    ["自定义输入..."] + EXAMPLES,
-)
+if not has_msgs and not st.session_state.running:
+    st.markdown("""
+    <div class="welcome">
+        <div class="welcome-icon">🔬</div>
+        <div class="welcome-title">DeepResearch-Agent</div>
+        <div class="welcome-sub">多智能体协作深度研究系统<br>输入研究问题，AI 自动搜索、验证、分析并生成带引用的研究报告</div>
+        <div class="welcome-tags">
+            <span class="wtag">🧠 Simulate-Before-Act</span>
+            <span class="wtag">🔬 NLI 交叉验证</span>
+            <span class="wtag">🧐 LLM-as-a-Judge</span>
+            <span class="wtag">📄 自动引用追踪</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Main input area
-col1, col2 = st.columns([5, 1])
-with col1:
-    if selected_example == "自定义输入...":
-        query = st.text_input(
-            "🔍 输入你的研究问题",
-            placeholder="例如：Compare LangGraph and CrewAI for multi-agent development",
+if has_msgs:
+    for m in st.session_state.msgs:
+        if m["role"] == "user":
+            st.markdown(f'<div class="u-msg">{m["content"]}</div>', unsafe_allow_html=True)
+        else:
+            # 【修复点 3】：渲染历史消息时，如果带有日志，就渲染出一个折叠面板
+            logs_html = ""
+            if "logs" in m and m["logs"]:
+                joined_logs = "\n".join(m["logs"]).replace("<", "&lt;").replace(">", "&gt;")
+                logs_html = (
+                    f'<details class="log-dropdown">'
+                    f'<summary>🔽 展开思考与验证日志</summary>'
+                    f'<div class="log-content">{joined_logs}</div>'
+                    f'</details>'
+                )
+            
+            # 渲染所有的步骤为绿色的“完成”状态，代表这是历史记录
+            pills = ""
+            for key, icon, name in STEPS:
+                pills += f'<span class="sp sp-done">{icon} {name} ✓</span>'
+                
+            st.markdown(
+                f'<div class="a-msg"><div class="a-label">🔬 DeepResearch-Agent · {m["time"]}</div>'
+                f'<div>{pills}</div>'
+                f'<div class="detail-line" style="margin-top:8px;">➤ {m["content"]}</div>'
+                f'{logs_html}</div>', unsafe_allow_html=True)
+
+if st.session_state.report and not st.session_state.running:
+    rm = st.session_state.rmeta
+    expander_title = f"📄 点击查看完整研究报告 ({rm.get('chars',0):,} 字 | 评分 {rm.get('score',0):.1f}/10)"
+    
+    with st.expander(expander_title, expanded=True):
+        st.markdown(st.session_state.report)
+        st.divider()
+        st.download_button(
+            label="📥 下载 Markdown 报告", 
+            data=st.session_state.report,
+            file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+            mime="text/markdown", 
+            use_container_width=True
         )
-    else:
-        query = st.text_input("🔍 输入你的研究问题", value=selected_example)
 
-with col2:
-    st.markdown("<br>", unsafe_allow_html=True)
-    run_button = st.button("🚀 开始研究", type="primary", use_container_width=True)
+if st.session_state.running and st.session_state.pending:
+    do_research(st.session_state.pending)
+    st.rerun()
 
-# Pipeline visualization in sidebar
-render_agent_pipeline("")
-
-# Run research
-if run_button and query:
-    run_research_ui(query)
-elif run_button and not query:
-    st.warning("请输入一个研究问题。")
-
-# Footer
-st.markdown("---")
-st.markdown(
-    "<div style='text-align:center; color:#64748b; font-size:0.8rem;'>"
-    "DeepResearch-Agent · Simulate-Before-Act · Cross-Source NLI Verification · LLM-as-a-Judge"
-    "</div>",
-    unsafe_allow_html=True,
-)
+query = st.chat_input("输入你的研究问题...")
+if query:
+    st.session_state.msgs.append({"role": "user", "content": query, "time": datetime.now().strftime("%H:%M")})
+    st.session_state.running = True
+    st.session_state.report = None
+    st.session_state.rmeta = {}
+    st.session_state.pending = query
+    st.rerun()
