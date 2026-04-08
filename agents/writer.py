@@ -15,13 +15,13 @@ def writer_node(state: ResearchState) -> dict:
     
     Strategy: Always write from scratch using the latest analysis,
     but incorporate Critic feedback as additional constraints.
-    This avoids the "degrading refinement" problem.
+    Passes actual source URLs to prevent URL fabrication.
     """
     print("\n" + "=" * 60)
     print("✍️  [撰写器] 正在生成研究报告...")
     print("=" * 60)
     
-    main_llm = get_main_llm(temperature=0.4, max_tokens=4096)
+    main_llm = get_main_llm(temperature=0.4, max_tokens=8192)
     iteration = state.get("current_iteration", 0)
     feedback = state.get("critic_feedback")
     
@@ -37,16 +37,32 @@ def writer_node(state: ResearchState) -> dict:
     else:
         critic_feedback_text = "无（首次撰写）"
     
-    # Always write from scratch with latest analysis + feedback constraints
+    # Build actual source pool from search results
+    search_results = state.get("search_results", [])
+    source_pool_lines = []
+    seen_urls = set()
+    for r in search_results:
+        if r.url and r.url not in seen_urls:
+            seen_urls.add(r.url)
+            source_pool_lines.append(f"- [{r.title}]: {r.url}")
+    source_pool_text = "\n".join(source_pool_lines) if source_pool_lines else "无可用来源"
+    
+    print(f"  可用来源: {len(seen_urls)} 个")
+    
+    # Always write from scratch with latest analysis + feedback + source pool
     report = call_llm(main_llm, WRITE_REPORT_PROMPT.format(
         user_query=state["user_query"],
         analysis_summary=state.get("analysis_summary", "无分析结果。"),
         critic_feedback=critic_feedback_text,
+        source_pool=source_pool_text,
     ))
     
     # Extract citations
     import re
     citations = []
+    for match in re.finditer(r'\[来源:\s*(https?://[^\]]+)\]', report):
+        citations.append({"url": match.group(1)})
+    # Also match English format
     for match in re.finditer(r'\[Source:\s*(https?://[^\]]+)\]', report):
         citations.append({"url": match.group(1)})
     
