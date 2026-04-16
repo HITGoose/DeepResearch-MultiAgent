@@ -1,4 +1,4 @@
-# 🔬 DeepResearch-Agent
+# 🔬 DeepResearch-Agent MultiAgent深度研究系统
 
 基于 LangGraph 的多 Agent 协作深度研究系统，通过 **Simulate-Before-Act** 搜索规划和 **Cross-Source NLI Verification** 机制，生成带引用的高质量研究报告。
 
