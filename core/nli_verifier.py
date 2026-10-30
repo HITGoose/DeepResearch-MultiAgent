@@ -66,21 +66,21 @@ class NLIVerifier:
     
     def cross_verify_claims(
         self,
-        claims_by_source: dict[str, list[str]]
+        claims_by_source: dict[str, list[str]],
+        summaries_by_source: dict[str, str] = None,
     ) -> list[dict]:
         """
-        Cross-verify claims across multiple sources.
+        Cross-verify claims using claim-to-summary matching.
         
-        Performance: limits sources and claims, batches NLI calls,
-        and uses keyword pre-filter to keep runtime under 30 seconds.
+        Instead of comparing claim vs claim (too strict),
+        we compare each claim against other sources' full summaries.
+        This dramatically improves entailment detection.
         """
         self._load_model()
         
-        # --- Strict limits to prevent CPU hang ---
         MAX_SOURCES = 8
         MAX_CLAIMS_PER_SOURCE = 3
         
-        # Take only top N sources
         limited_sources = dict(list(claims_by_source.items())[:MAX_SOURCES])
         
         # Collect unique claims
@@ -92,44 +92,38 @@ class NLIVerifier:
         
         print(f"    验证范围: {len(limited_sources)} 个来源, {len(all_claims)} 条声明")
         
-        # --- Build pairs to verify (with keyword pre-filter) ---
-        STOPWORDS = {"the", "a", "an", "is", "are", "was", "were", "of", "and", "to", "in", "for", "on", "with", "that", "it", "as", "by", "this", "from", "or", "be", "can", "has", "have", "not", "its"}
+        # Build summary lookup (use claims joined as fallback if no summaries provided)
+        source_summaries = {}
+        if summaries_by_source:
+            source_summaries = {k: v[:500] for k, v in list(summaries_by_source.items())[:MAX_SOURCES]}
+        else:
+            for src, claims in limited_sources.items():
+                source_summaries[src] = ". ".join(claims[:MAX_CLAIMS_PER_SOURCE])[:500]
         
-        pairs_to_check = []
-        sources_list = list(limited_sources.keys())
+        # Compare each claim against OTHER sources' summaries (not individual claims)
+        pairs_checked = 0
+        MAX_COMPARISONS = 100
         
         for claim, info in all_claims.items():
-            claim_words = set(claim.lower().split()) - STOPWORDS
-            for other_source in sources_list:
+            for other_source, summary in source_summaries.items():
                 if other_source == info["origin"]:
                     continue
-                for other_claim in limited_sources[other_source][:MAX_CLAIMS_PER_SOURCE]:
-                    other_words = set(other_claim.lower().split()) - STOPWORDS
-                    if len(claim_words & other_words) >= 2:
-                        pairs_to_check.append((claim, other_claim, other_source))
+                if pairs_checked >= MAX_COMPARISONS:
+                    break
+                
+                result = self.verify_claim_against_source(claim, summary)
+                pairs_checked += 1
+                
+                if result["label"] == "entailment" and result["scores"]["entailment"] > 0.75:
+                    if other_source not in info["supporters"]:
+                        info["supporters"].append(other_source)
+                elif result["label"] == "contradiction" and result["scores"]["contradiction"] > 0.9:
+                    if other_source not in info["contradictors"]:
+                        info["contradictors"].append(other_source)
         
-        print(f"    需要验证的配对数: {len(pairs_to_check)}")
+        print(f"    NLI 验证完成: {pairs_checked} 对配对已检查 ✅")
         
-        # --- Cap total comparisons ---
-        MAX_COMPARISONS = 100
-        if len(pairs_to_check) > MAX_COMPARISONS:
-            print(f"    ⚠️ 配对数过多，截取前 {MAX_COMPARISONS} 对")
-            pairs_to_check = pairs_to_check[:MAX_COMPARISONS]
-        
-        # --- Run NLI ---
-        for i, (claim, other_claim, other_source) in enumerate(pairs_to_check):
-            result = self.verify_claim_against_source(claim, other_claim)
-            
-            if result["label"] == "entailment" and result["scores"]["entailment"] > 0.85:
-                if other_source not in all_claims[claim]["supporters"]:
-                    all_claims[claim]["supporters"].append(other_source)
-            elif result["label"] == "contradiction" and result["scores"]["contradiction"] > 0.9:
-                if other_source not in all_claims[claim]["contradictors"]:
-                    all_claims[claim]["contradictors"].append(other_source)
-        
-        print(f"    NLI 验证完成: {len(pairs_to_check)} 对配对已检查 ✅")
-        
-        # --- Determine confidence ---
+        # Determine confidence
         results = []
         for claim, info in all_claims.items():
             if len(info["contradictors"]) >= 2:

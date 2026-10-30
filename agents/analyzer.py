@@ -52,8 +52,17 @@ def analyzer_node(state: ResearchState) -> dict:
         verifier = NLIVerifier()
         
         try:
-            raw_verifications = verifier.cross_verify_claims(claims_by_source)
-            
+            # Build summaries lookup for claim-to-summary verification
+            summaries_by_source = {}
+            for result in recent_results:
+                source_key = result.url or result.title
+                if source_key and result.summary:
+                    summaries_by_source[source_key] = result.summary
+
+            raw_verifications = verifier.cross_verify_claims(
+                claims_by_source,
+                summaries_by_source=summaries_by_source,
+            )
             for v in raw_verifications:
                 verified_claims.append(ClaimVerification(
                     claim=v["claim"],
