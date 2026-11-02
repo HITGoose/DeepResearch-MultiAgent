@@ -15,6 +15,7 @@ from rich.markdown import Markdown
 
 from core.graph import compile_graph
 from core.state import ResearchState
+from core.memory import new_run_id
 
 console = Console()
 
@@ -39,6 +40,7 @@ def run_research(query: str, verbose: bool = True) -> str:
     # Initialize state
     initial_state: ResearchState = {
         "user_query": query,
+        "run_id": new_run_id(),
         "candidate_plans": [],
         "selected_plan": None,
         "search_results": [],

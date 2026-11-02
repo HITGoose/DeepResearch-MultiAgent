@@ -8,7 +8,10 @@ then synthesizes a verified analysis with confidence markers.
 from core.state import ResearchState, ClaimVerification
 from core.llm import get_main_llm, call_llm
 from core.nli_verifier import NLIVerifier
+from core.memory import MemoryStore
 from prompts.analyzer_prompt import ANALYZE_AND_SYNTHESIZE_PROMPT
+
+MAX_PREVIOUS_ANALYSIS_CHARS = 3000  # 上一轮分析约 800 词，读回时设上限防止 token 失控
 
 
 def analyzer_node(state: ResearchState) -> dict:
@@ -34,8 +37,9 @@ def analyzer_node(state: ResearchState) -> dict:
             "status": "writing",
         }
     
-    # --- Step 1: Group claims by source (only latest 15 results) ---
-    recent_results = search_results[-15:]  # Avoid accumulated results from previous iterations
+    # --- Step 1: Group claims by source ---
+    # search_results 每轮会被清空，这里只有本轮结果；截取 15 条只是为了控制 token
+    recent_results = search_results[-15:]
     claims_by_source: dict[str, list[str]] = {}
     for result in recent_results:
         source_key = result.url or result.title
@@ -105,12 +109,30 @@ def analyzer_node(state: ResearchState) -> dict:
     for r in recent_results:
         search_summaries_text += f"\n### {r.title} [{r.source_type}]\nURL: {r.url}\n{r.summary}\n"
     
+    # 读回上一轮的分析：Writer 每轮从头重写，而本轮搜索只针对 Critic 指出的缺口，
+    # 如果不带上之前的结论，新报告补上了缺口却会丢掉上一轮已经覆盖的内容
+    memory = MemoryStore(state.get("run_id"))
+    iteration = state.get("current_iteration", 0)
+    previous = memory.load(f"round_{iteration - 1}") if iteration > 0 else None
+    if previous:
+        previous_analysis_text = previous["analysis"][:MAX_PREVIOUS_ANALYSIS_CHARS]
+        print(f"  读回第 {iteration} 轮分析（{len(previous_analysis_text)} 字符）")
+    else:
+        previous_analysis_text = "None (first round)."
+
     analysis = call_llm(main_llm, ANALYZE_AND_SYNTHESIZE_PROMPT.format(
         user_query=state["user_query"],
+        previous_analysis_text=previous_analysis_text,
         verified_claims_text=verified_claims_text,
         search_summaries_text=search_summaries_text[:3000],  # Cap to prevent token explosion
     ))
-    
+
+    # 本轮分析和来源存进记忆：下一轮 Analyzer 读回分析，Writer 读回所有轮次的来源
+    sources = [{"title": r.title, "url": r.url} for r in recent_results if r.url]
+    if previous:
+        sources = previous["sources"] + sources
+    memory.save(f"round_{iteration}", {"analysis": analysis, "sources": sources})
+
     print(f"✅ [分析器] 分析完成（{len(analysis)} 字符）")
     
     return {

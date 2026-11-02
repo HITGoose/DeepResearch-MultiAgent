@@ -149,9 +149,11 @@ def do_research(query):
 
     from core.graph import compile_graph
     from core.state import ResearchState
+    from core.memory import new_run_id
 
     init: ResearchState = {
         "user_query": query,
+        "run_id": new_run_id(),
         "candidate_plans": [], "selected_plan": None,
         "search_results": [], "verified_claims": [],
         "analysis_summary": "", "report_draft": "",

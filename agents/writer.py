@@ -6,7 +6,10 @@ and confidence markers based on the Analyzer's verified output.
 """
 from core.state import ResearchState
 from core.llm import get_main_llm, call_llm
+from core.memory import MemoryStore
 from prompts.writer_prompt import WRITE_REPORT_PROMPT, REFINE_REPORT_PROMPT
+
+MAX_SOURCE_POOL = 30  # 来源池最多列出的 URL 数
 
 
 def writer_node(state: ResearchState) -> dict:
@@ -38,20 +41,24 @@ def writer_node(state: ResearchState) -> dict:
         critic_feedback_text = "无（首次撰写）"
     
     # Build actual source pool from search results
-    # Build actual source pool from search results
+    # search_results 只有本轮结果；分析里保留了之前轮次的结论，所以来源池也要从记忆里
+    # 读回之前轮次的来源，否则 Writer 引用旧结论时找不到 URL，只能编造或删掉
     search_results = state.get("search_results", [])
-    
-    # 1. 确保取最新的结果，防止 Token 爆炸
-    recent_results = search_results[-20:] 
-    
+    sources = [{"title": r.title, "url": r.url} for r in search_results]
+    saved_round = MemoryStore(state.get("run_id")).load(f"round_{iteration}")
+    if saved_round:
+        sources += saved_round["sources"]
+
     source_pool_lines = []
     seen_urls = set()
-    
-    # 2. ✅ 将这里改为遍历 recent_results！
-    for r in recent_results: 
-        if r.url and r.url not in seen_urls:
-            seen_urls.add(r.url)
-            source_pool_lines.append(f"- [{r.title}]: {r.url}")
+
+    # 本轮来源排在前面，总数设上限防止 Token 爆炸
+    for s in sources:
+        if len(source_pool_lines) >= MAX_SOURCE_POOL:
+            break
+        if s["url"] and s["url"] not in seen_urls:
+            seen_urls.add(s["url"])
+            source_pool_lines.append(f"- [{s['title']}]: {s['url']}")
             
     source_pool_text = "\n".join(source_pool_lines) if source_pool_lines else "无可用来源"
     

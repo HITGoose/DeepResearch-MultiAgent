@@ -29,6 +29,9 @@ ANALYZE_AND_SYNTHESIZE_PROMPT = """You are a Research Analyzer. Synthesize verif
 ## User Query
 {user_query}
 
+## Previous Round Analysis
+{previous_analysis_text}
+
 ## Verified Claims
 {verified_claims_text}
 
@@ -42,6 +45,7 @@ Create a comprehensive analysis that:
 3. Flags disputed areas (sources contradict each other)
 4. Notes gaps where information is insufficient
 5. Preserves source attribution for each key point
+6. If a previous round analysis is given, keep its findings that are still valid and merge them with the new results (this round's searches targeted gaps in the previous report), so the final analysis covers both
 
 Keep the analysis concise (under 800 words) — the Writer will expand it into a full report.
 

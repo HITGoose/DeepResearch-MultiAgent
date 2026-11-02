@@ -11,6 +11,11 @@ from datetime import datetime
 from config import MEMORY_DIR
 
 
+def new_run_id() -> str:
+    """一次研究（所有迭代轮次）共用一个 run_id，对应 outputs/memory/<run_id>/ 目录。"""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 class MemoryStore:
     """Simple file-based memory store for agent intermediate results."""
     

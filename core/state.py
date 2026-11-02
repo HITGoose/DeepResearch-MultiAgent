@@ -84,6 +84,7 @@ class ResearchState(TypedDict):
     """
     # --- Input ---
     user_query: str                                    # Original user question
+    run_id: str                                        # File-as-Memory 会话目录，一次研究的所有轮次共用
 
     # --- Planner outputs ---
     candidate_plans: list[CandidatePlan]               # Simulate-Before-Act: all candidates
