@@ -60,10 +60,12 @@ def prepare_iteration(state: ResearchState) -> dict:
         failed.append(selected_plan.strategy)
     
     # Clear search results to avoid accumulation
+    # 必须返回 None：reducer 是追加型的，返回 [] 只是"旧值 + []"，清不掉
+    # 上一轮的结果已经存进 File-as-Memory，需要时由 Analyzer / Writer 读回
     return {
         "current_iteration": iteration + 1,
         "failed_strategies": failed,
-        "search_results": [],  # Reset for fresh search
+        "search_results": None,  # Reset for fresh search
         "status": "planning",
     }
 

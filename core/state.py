@@ -7,7 +7,6 @@ Key design principle: only pass compressed summaries, never raw content.
 from __future__ import annotations
 from typing import TypedDict, Annotated
 from pydantic import BaseModel, Field
-import operator
 
 
 # ===== Sub-structures =====
@@ -58,6 +57,20 @@ class CriticFeedback(BaseModel):
     verdict: str = Field(description="pass or refine")
 
 
+# ===== Reducers =====
+
+def merge_search_results(existing: list[SearchResult] | None, update: list[SearchResult] | None) -> list[SearchResult]:
+    """
+    追加型 reducer，节点返回 None 时清空。
+
+    原来用 operator.add：prepare_iteration 返回 [] 只会得到"旧值 + []"，
+    结果跨轮累积，Analyzer / Writer 只能靠截取最近几条补救。
+    """
+    if update is None:
+        return []
+    return (existing or []) + update
+
+
 # ===== Main State =====
 
 class ResearchState(TypedDict):
@@ -71,13 +84,13 @@ class ResearchState(TypedDict):
     """
     # --- Input ---
     user_query: str                                    # Original user question
-    
+
     # --- Planner outputs ---
     candidate_plans: list[CandidatePlan]               # Simulate-Before-Act: all candidates
     selected_plan: CandidatePlan | None                # The chosen plan
     
     # --- Searcher outputs ---
-    search_results: Annotated[list[SearchResult], operator.add]  # Accumulated search results
+    search_results: Annotated[list[SearchResult], merge_search_results]  # 本轮搜索结果，返回 None 清空
     
     # --- Analyzer outputs ---
     verified_claims: list[ClaimVerification]            # Cross-source verification results
