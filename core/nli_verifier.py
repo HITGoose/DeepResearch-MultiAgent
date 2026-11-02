@@ -53,9 +53,12 @@ class NLIVerifier:
                 "scores": {"entailment": 0.33, "contradiction": 0.33, "neutral": 0.34}
             }
         
-        scores = self._model.predict([(source_text, claim)])
-        # Model outputs: [contradiction, entailment, neutral]
-        labels = ["contradiction", "entailment", "neutral"]
+        # CrossEncoder 多分类默认返回 logits（如 6.8 / -3.7），不是概率；
+        # 下面和 0.75 / 0.9 比较的是概率阈值，所以必须先做 softmax
+        scores = self._model.predict([(source_text, claim)], apply_softmax=True)
+        # 标签顺序以模型自带的 id2label 为准（nli-deberta-v3-base: contradiction, entailment, neutral）
+        id2label = self._model.model.config.id2label
+        labels = [id2label[i].lower() for i in range(len(id2label))]
         score_dict = {label: float(score) for label, score in zip(labels, scores[0])}
         predicted_label = max(score_dict, key=score_dict.get)
         
