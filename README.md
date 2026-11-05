@@ -4,11 +4,52 @@
 
 ## 架构
 
+**输入**：一个研究问题（命令行 `main.py` 或 Streamlit 页面 `app.py`）。
+**输出**：带来源链接和 ✅⚠️❓ 置信标记的 Markdown 研究报告，保存在 `outputs/reports/`。
+
+### 工作流（LangGraph StateGraph，`core/graph.py`）
+
+```mermaid
+flowchart TD
+    Q["用户问题"] --> P["规划器 planner<br/>生成 3 个候选计划<br/>轻量模型模拟覆盖度，选最高分"]
+    P --> S["搜索器 searcher<br/>按子查询依次搜索 Tavily / ArXiv / 维基百科<br/>每个子查询前 3 条压缩成摘要和声明"]
+    S --> A["分析器 analyzer<br/>NLI 交叉验证：声明对其他来源的摘要<br/>大模型综合成分析"]
+    A --> W["撰写器 writer<br/>只引用来源池里的 URL<br/>每轮从头撰写"]
+    W --> C["评审器 critic<br/>完整性、准确性、连贯性打分<br/>给出 pass / refine"]
+    C -- "pass，或已跑满 4 轮" --> F["finalize<br/>保存到 outputs/reports/"]
+    C -- "refine" --> PI["prepare_iteration<br/>轮数 +1，记录失败策略<br/>清空本轮搜索结果"]
+    PI --> P
 ```
-用户问题 → 规划器 → 搜索器 → 分析器 → 撰写器 → 评审器
-             ↑                                      │
-             └──── 迭代改进（得分 < 阈值时触发）────┘
-```
+
+**File-as-Memory**（`outputs/memory/<run_id>/`，一次研究的所有轮次共用）：
+- 搜索器：按子查询存原文和压缩摘要；之后的轮次遇到相同子查询直接读回，不再重复搜索和压缩。
+- 分析器：保存本轮分析和来源，下一轮读回上一轮的分析一起综合。
+- 撰写器：读回之前轮次的来源，放进来源池。
+
+- **节点**：5 个智能体，加上 `prepare_iteration`（进入下一轮前的整理）和 `finalize`（保存报告）。
+- **条件边**：只有评审器之后一条（`should_continue`）。评审器判定 pass，或者已经跑满 4 轮（`MAX_ITERATIONS = 3` 次重来），就结束；否则带着评审意见回到规划器，上一轮选中的策略会被记为失败策略，下一轮规划时避开。
+- **pass / refine 由评审器的大模型给出**：阈值 6.0 写在评审提示词里，代码只读取判定结果。
+
+### 状态（`core/state.py`）
+
+| 字段 | 写入者 | 内容 |
+|---|---|---|
+| `user_query`、`run_id` | 入口 | 研究问题；本次研究共用的记忆目录名 |
+| `candidate_plans`、`selected_plan` | 规划器 | 全部候选计划及覆盖度；选中的计划 |
+| `search_results` | 搜索器 | 本轮的压缩结果（摘要 + 原子声明，不含原文）；自定义 reducer，返回 `None` 时清空 |
+| `verified_claims`、`analysis_summary` | 分析器 | 每条声明的置信度和支持 / 反对来源；综合分析 |
+| `report_draft`、`citations` | 撰写器 | 报告；从报告中解析出的引用 URL |
+| `critic_feedback` | 评审器 | 各维度得分、缺失内容、改进建议、判定 |
+| `current_iteration`、`failed_strategies`、`status` | 控制 | 当前轮数（从 0 开始）；要避开的策略；当前阶段 |
+
+### 模型与工具
+
+| 用途 | 选型 |
+|---|---|
+| 主模型（规划、分析、撰写、评审） | DeepSeek `deepseek-chat`，通过 OpenAI 兼容接口调用，可配置 |
+| 轻量模型（覆盖度模拟、搜索结果压缩） | 默认同为 `deepseek-chat`，可单独配置 |
+| NLI 交叉验证 | `cross-encoder/nli-deberta-v3-base`，本地运行 |
+| 搜索 | Tavily（网页，每个子查询 5 条）、ArXiv（3 条）、维基百科（英文） |
 
 ### 智能体
 
